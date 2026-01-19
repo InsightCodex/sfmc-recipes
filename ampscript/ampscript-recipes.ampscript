@@ -1,0 +1,253 @@
+%%[
+/* =============================================================================
+   ampscript-recipes.ampscript
+   Practical AMPScript snippets for SFMC Email/CloudPages.
+
+   How to use:
+   - Each section is a copy/paste “recipe”.
+   - Copy the whole section INCLUDING its VAR() declarations.
+   - Some recipes assume you already have @SubscriberKey set (Recipe 00).
+   - Data Extension names/fields are examples — swap to your BU naming.
+
+   Optional DEs used in examples:
+   - Member_Preferences (SubscriberKey, PreferredName, LoyaltyTier, PrimaryInterest, MarketingConsent)
+   - Active_Policies (SubscriberKey, PolicyName, PolicyID)
+   - AMP_Debug_Log (EventTime, SubscriberKey, Context, Message)
+   ============================================================================= */
+]%%
+
+
+%%[
+/* =============================================================================
+   RECIPE 00 — Standard Send Context Vars (+ optional debug logging)
+
+   Use when:
+   - You want consistent access to SubscriberKey / Job context
+   - You want optional lightweight logging (best effort)
+
+   Notes:
+   - AttributeValue() reads from send context attributes.
+   - Keep @DebugEnabled FALSE unless agreed (logging can add load).
+   ============================================================================= */
+VAR @SubscriberKey, @Email, @JobID, @ListID, @BatchID, @Now
+VAR @DebugEnabled, @Context, @LogMsg
+
+SET @SubscriberKey = AttributeValue("SubscriberKey")
+SET @Email         = AttributeValue("EmailAddress")
+SET @JobID         = AttributeValue("JobID")
+SET @ListID        = AttributeValue("ListID")
+SET @BatchID       = AttributeValue("BatchID")
+SET @Now           = Now()
+
+SET @DebugEnabled  = "FALSE"
+SET @Context       = Concat("Job=", @JobID, "|List=", @ListID, "|Batch=", @BatchID)
+
+IF @DebugEnabled == "TRUE" THEN
+  SET @LogMsg = Concat("Render start. Email=", @Email)
+  InsertDE("AMP_Debug_Log", "EventTime", @Now, "SubscriberKey", @SubscriberKey, "Context", @Context, "Message", @LogMsg)
+ENDIF
+]%%
+
+
+%%[
+/* =============================================================================
+   RECIPE 01 — LookupRows once, read many fields (performance pattern)
+
+   Use when:
+   - You need multiple fields from the same DE row
+   - You want to avoid multiple Lookup() calls
+
+   Requires:
+   - @SubscriberKey set (use Recipe 00)
+
+   Output vars:
+   - @PreferredName, @LoyaltyTier, @PrimaryInterest, @MarketingConsent
+   ============================================================================= */
+VAR @PrefRows, @PrefRow
+VAR @PreferredName, @LoyaltyTier, @PrimaryInterest, @MarketingConsent
+
+SET @PrefRows = LookupRows("Member_Preferences", "SubscriberKey", @SubscriberKey)
+
+IF RowCount(@PrefRows) > 0 THEN
+  SET @PrefRow          = Row(@PrefRows, 1)
+  SET @PreferredName    = Field(@PrefRow, "PreferredName")
+  SET @LoyaltyTier      = Field(@PrefRow, "LoyaltyTier")
+  SET @PrimaryInterest  = Field(@PrefRow, "PrimaryInterest")
+  SET @MarketingConsent = Field(@PrefRow, "MarketingConsent")
+ELSE
+  /* Defaults if no row exists */
+  SET @PreferredName    = AttributeValue("FirstName")
+  SET @LoyaltyTier      = "Standard"
+  SET @PrimaryInterest  = ""
+  SET @MarketingConsent = "Unknown"
+ENDIF
+]%%
+
+
+%%[
+/* =============================================================================
+   RECIPE 02 — Defensive display name (safe fallback)
+
+   Use when:
+   - You want a clean greeting even if data is blank
+
+   Requires:
+   - @PreferredName already set (Recipe 01 OR your own logic)
+
+   Output:
+   - @Greeting
+   ============================================================================= */
+VAR @Greeting
+
+IF EMPTY(@PreferredName) THEN
+  SET @Greeting = "Valued Member"
+ELSE
+  SET @Greeting = ProperCase(@PreferredName)
+ENDIF
+]%%
+
+<!-- Example usage -->
+<!-- Hi %%=v(@Greeting)=%%, -->
+
+
+%%[
+/* =============================================================================
+   RECIPE 03 — Consent gating (simple compliance-aware branching)
+
+   Use when:
+   - You must branch based on marketing consent
+
+   Requires:
+   - @MarketingConsent set (Recipe 01 OR your own logic)
+
+   Output:
+   - @IsMarketable ("TRUE"/"FALSE")
+   ============================================================================= */
+VAR @IsMarketable
+
+IF Uppercase(@MarketingConsent) == "YES" THEN
+  SET @IsMarketable = "TRUE"
+ELSE
+  SET @IsMarketable = "FALSE"
+ENDIF
+
+IF @DebugEnabled == "TRUE" THEN
+  SET @LogMsg = Concat("Consent=", @MarketingConsent, " Marketable=", @IsMarketable)
+  InsertDE("AMP_Debug_Log", "EventTime", @Now, "SubscriberKey", @SubscriberKey, "Context", @Context, "Message", @LogMsg)
+ENDIF
+]%%
+
+<!-- Example usage -->
+%%[ IF @IsMarketable == "TRUE" THEN ]%%
+  <!-- marketing content -->
+%%[ ELSE ]%%
+  <!-- service-only content -->
+%%[ ENDIF ]%%
+
+
+%%[
+/* =============================================================================
+   RECIPE 04 — Dynamic URL build + RedirectTo wrapper (useful for dynamic tracking)
+
+   Use when:
+   - You assemble a URL dynamically and want consistent click tracking wrapping
+
+   Notes:
+   - RedirectTo is not "mandatory", but commonly used for dynamic URLs
+   - Keep values generic/dummy in public repos
+
+   Output:
+   - @FinalURL
+   ============================================================================= */
+VAR @BaseURL, @MemberID, @CampaignCode, @FinalURL
+
+SET @BaseURL = "https://www.example.com/renewal" /* dummy/public URL */
+SET @MemberID = AttributeValue("MemberID")
+SET @CampaignCode = "RENEW_2026"
+
+IF EMPTY(@MemberID) THEN
+  SET @MemberID = @SubscriberKey
+ENDIF
+
+SET @FinalURL = RedirectTo(
+  Concat(@BaseURL, "?mid=", @MemberID, "&utm_campaign=", @CampaignCode)
+)
+]%%
+
+<!-- Example usage -->
+<!-- <a href="%%=v(@FinalURL)=%%">Renew Now</a> -->
+
+
+%%[
+/* =============================================================================
+   RECIPE 05 — Rowset loop (transactional list rendering)
+
+   Use when:
+   - You need to render multiple rows (e.g., policies, orders)
+
+   Requires:
+   - @SubscriberKey set (Recipe 00)
+
+   Output:
+   - @PolicyCount and per-loop @PolicyName / @PolicyID
+   ============================================================================= */
+VAR @Policies, @PolicyCount, @i, @CurrentRow, @PolicyName, @PolicyID
+
+SET @Policies = LookupRows("Active_Policies", "SubscriberKey", @SubscriberKey)
+SET @PolicyCount = RowCount(@Policies)
+]%%
+
+%%[ IF @PolicyCount > 0 THEN ]%%
+  <p><strong>Your active policies:</strong></p>
+
+  %%[ FOR @i = 1 TO @PolicyCount DO
+        SET @CurrentRow = Row(@Policies, @i)
+        SET @PolicyName = Field(@CurrentRow, "PolicyName")
+        SET @PolicyID   = Field(@CurrentRow, "PolicyID")
+
+        IF EMPTY(@PolicyName) THEN SET @PolicyName = "Policy" ENDIF
+        IF EMPTY(@PolicyID) THEN SET @PolicyID = "N/A" ENDIF
+  ]%%
+        <p>• %%=v(@PolicyName)=%% (ID: %%=v(@PolicyID)=%%)</p>
+  %%[ NEXT @i ]%%
+
+%%[ ELSE ]%%
+  <p>No active policies found.</p>
+%%[ ENDIF ]%%
+
+
+%%[
+/* =============================================================================
+   RECIPE 06 — Render a shared Content Block by key (modularity)
+
+   Use when:
+   - You want reusable components shared across templates
+
+   Notes:
+   - Treat keys as controlled config (naming conventions + testing)
+   - Prefer direct render vs storing block content in a variable
+
+   Output:
+   - Renders the block inline
+   ============================================================================= */
+VAR @LogicBlockKey
+SET @LogicBlockKey = "Global_Campaign_Logic"
+
+IF @DebugEnabled == "TRUE" THEN
+  SET @LogMsg = Concat("Render content block key=", @LogicBlockKey)
+  InsertDE("AMP_Debug_Log", "EventTime", @Now, "SubscriberKey", @SubscriberKey, "Context", @Context, "Message", @LogMsg)
+ENDIF
+]%%
+
+%%=ContentBlockByKey("Global_Campaign_Logic")=%%
+
+
+%%[
+/* =============================================================================
+   RECIPE 99 — End render log (optional)
+   ============================================================================= */
+IF @DebugEnabled == "TRUE" THEN
+  SET @LogMsg = "Render end."
+  InsertDE("AMP_Debug_Log", "EventTime", @Now, "SubscriberKey", @SubscriberKey, "Context", @Context, "Message", @LogMsg)
+ENDIF
+]%%
