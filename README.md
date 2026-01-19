@@ -1,7 +1,14 @@
-# sfmc-recipes
+# SFMC Recipes (Portfolio)
 
-SFMC Data Engineering: SQL Best Practices & Patterns
-This repository contains a curated collection of T-SQL (SQL Server) patterns and optimization strategies specifically designed for Salesforce Marketing Cloud (SFMC).
+Small, practical snippets I use as quick lookup for Salesforce Marketing Cloud work.
 
-🎯 Purpose
-In an enterprise CRM environment, data integrity is the foundation of 1:1 personalization. This guide moves beyond basic SQL to address the unique constraints of the SFMC Automation Studio environment, such as the 30-minute timeout limit and the nuances of multi-tenant data architecture.
+## What’s in this repo
+- **SQL cheatsheet**  
+  `sql/sfmc-query-recipes.sql` — SFMC Query Activity patterns (segmentation, dedupe, incremental loads).
+
+- **SSJS WSProxy pagination**  
+  `ssjs/wsproxy-de-pagination-batch.js` — reads Data Extension rows beyond the 2,500 record limit using WSProxy + batching.
+
+- **AMPScript recipes**  
+  `ampscript/ampscript-recipes.ampscript` — copy/paste snippets for email/CloudPages (LookupRows performance pattern, defensive defaults, consent gating, dynamic URLs with RedirectTo, rowset loops, modular ContentBlock usage).
+
