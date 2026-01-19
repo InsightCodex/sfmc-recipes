@@ -1,4 +1,4 @@
-# SFMC Recipes (Portfolio)
+# SFMC Recipes
 
 Small, practical snippets I use as quick lookup for Salesforce Marketing Cloud work.
 
